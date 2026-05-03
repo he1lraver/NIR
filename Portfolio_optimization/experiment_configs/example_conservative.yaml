@@ -1,0 +1,27 @@
+# Conservative Portfolio Configuration
+# Minimizes volatility with shrinkage covariance estimation
+
+market: moex
+tickers:
+  - SBER
+  - LKOH
+  - GAZP
+  - GMKN
+  - TATN
+  
+strategy: min_vol
+risk_free_rate: 0.10
+lookback_days: 756
+
+# Backtesting parameters
+train_window: 252
+rebalance_period: 42
+min_train_samples: 126
+
+# Risk settings
+use_shrinkage_covariance: true
+cvar_confidence: 0.95
+
+# Output
+verbose: true
+save_results: true
