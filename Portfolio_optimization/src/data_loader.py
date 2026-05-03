@@ -1,21 +1,52 @@
+"""
+Модуль загрузки финансовых данных с Московской Биржи (MOEX).
+
+Использует официальный API Мосбиржи через библиотеку apimoex.
+Реализует многопоточную загрузку для ускорения получения данных
+и автоматическую коррекцию цен на сплиты (дробления акций).
+
+Author: [Ваше ФИО]
+Version: 1.0
+"""
 import pandas as pd
 import apimoex
 import requests
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+
 class MoexDataLoader:
+    """
+    Класс для загрузки исторических данных о ценах акций с Московской Биржи.
+    
+    Attributes:
+        max_workers: Количество потоков для параллельной загрузки
+    """
+    
     def __init__(self):
-        # Количество одновременных соединений
-        self.max_workers = 10 
+        self.max_workers = 10
 
     def _fetch_sync(self, ticker: str, start: str, end: str) -> pd.DataFrame:
-        """Синхронный вызов к API мосбиржи (создаем отдельную сессию для потокобезопасности)"""
+        """
+        Синхронный запрос к API MOEX для одного тикера.
+        
+        Args:
+            ticker: Биржевой тикер (например, 'SBER')
+            start: Дата начала в формате YYYY-MM-DD
+            end: Дата окончания в формате YYYY-MM-DD
+            
+        Returns:
+            DataFrame с колонками TRADEDATE (индекс) и CLOSE (цена закрытия)
+        """
         try:
             with requests.Session() as session:
                 data = apimoex.get_board_history(
-                    session, security=ticker, board='TQBR',
-                    start=start, end=end, columns=('TRADEDATE', 'CLOSE')
+                    session, 
+                    security=ticker, 
+                    board='TQBR',
+                    start=start, 
+                    end=end, 
+                    columns=('TRADEDATE', 'CLOSE')
                 )
                 if not data:
                     return pd.DataFrame()
@@ -29,6 +60,20 @@ class MoexDataLoader:
             return pd.DataFrame()
 
     def fetch_all(self, tickers: list, start_date: datetime, end_date: datetime):
+        """
+        Загрузка данных по всем тикерам с последующей обработкой.
+        
+        Args:
+            tickers: Список тикеров для загрузки
+            start_date: Дата начала анализа
+            end_date: Дата окончания анализа
+            
+        Returns:
+            Кортеж (prices, returns):
+                - prices: DataFrame с ценами закрытия (с коррекцией на сплиты)
+                - returns: DataFrame с дневными доходностями
+                - None при ошибке загрузки
+        """
         start_str = start_date.strftime('%Y-%m-%d')
         end_str = end_date.strftime('%Y-%m-%d')
         
@@ -50,20 +95,15 @@ class MoexDataLoader:
         prices = pd.concat(valid_dfs, axis=1).sort_index()
         prices = prices.ffill().bfill()
         
-        # === АЛГОРИТМ АВТО-КОРРЕКЦИИ СПЛИТОВ (Adjusted Prices) ===
         for col in prices.columns:
-            # Ищем отношение цены сегодня к цене вчера
             ratios = prices[col] / prices[col].shift(1)
-            # Если цена упала более чем на 60% за день - это сплит (как у TRNFP)
-            splits = ratios[ratios < 0.4] 
+            splits = ratios[ratios < 0.4]
             
             for date, ratio in splits.items():
-                split_factor = round(1 / ratio) # Определяем коэффициент (например, 100)
+                split_factor = round(1 / ratio)
                 if split_factor > 1:
-                    # Делим все исторические цены ДО сплита на коэффициент
                     prices.loc[prices.index < date, col] /= split_factor
-        # ==========================================================
-
+        
         returns = prices.pct_change().dropna()
         valid_cols = returns.columns[returns.std() > 0.0001]
         
